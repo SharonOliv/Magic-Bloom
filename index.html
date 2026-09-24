@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Petal Trace</title>
+<style>
+:root{
+  --ink:#1b1d13; --paper:#f4f1e6; --moss:#3f5b3f; --clay:#c96a4b;
+  --gold:#d9a441; --line: rgba(27,29,19,0.14);
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ink:#f2efe3; --paper:#14160f; --moss:#8fb28f; --clay:#e08a68; --gold:#e6bd6b;
+    --line: rgba(242,239,227,0.16);
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#f2efe3; --paper:#14160f; --moss:#8fb28f; --clay:#e08a68; --gold:#e6bd6b;
+  --line: rgba(242,239,227,0.16);
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px); height:100%;}
+*{box-sizing:border-box;}
+body{
+  margin:0; height:100%; background:var(--paper); color:var(--ink);
+  font-family:"Iowan Old Style","Georgia",serif;
+  display:flex; flex-direction:column; overflow:hidden;
+}
+header{
+  padding:14px 18px calc(10px + env(safe-area-inset-top,0px));
+  display:flex; align-items:baseline; justify-content:space-between; gap:12px;
+  border-bottom:1px solid var(--line);
+}
+h1{font-size:19px; margin:0; font-weight:600; letter-spacing:0.01em;}
+h1 span{color:var(--clay); font-style:italic; font-weight:400;}
+main{position:relative; flex:1; min-height:0;}
+#stage{position:relative; width:100%; height:100%; background:#0b0c08; overflow:hidden;}
+video{
+  position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+  transform:scaleX(-1); opacity:0.9;
+}
+canvas{position:absolute; inset:0; width:100%; height:100%;}
+.hint{
+  position:absolute; left:50%; bottom:20px; transform:translateX(-50%);
+  background:rgba(20,22,15,0.65); color:#f4f1e6; padding:8px 16px;
+  border-radius:999px; font-size:13px; font-family:Menlo,Consolas,monospace;
+  letter-spacing:0.02em; pointer-events:none; transition:opacity .4s;
+}
+.gate{
+  position:absolute; inset:0; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:16px; background:var(--paper); text-align:center; padding:24px;
+}
+.gate p{max-width:340px; font-size:14.5px; line-height:1.5; color:var(--ink); opacity:0.75; margin:0;}
+button{
+  font-family:inherit; font-size:15px; padding:11px 26px; border-radius:999px;
+  border:1px solid var(--ink); background:var(--ink); color:var(--paper);
+  cursor:pointer;
+}
+button:focus-visible{outline:2px solid var(--clay); outline-offset:2px;}
+button.ghost{background:transparent; color:var(--ink);}
+.fs-toggle{
+  font-family:Menlo,Consolas,monospace; font-size:11.5px; padding:6px 12px;
+  border-radius:999px; border:1px solid rgba(255,255,255,0.3); background:rgba(20,22,15,0.55);
+  color:#fff; cursor:pointer; white-space:nowrap;
+}
+.fs-toggle:hover{border-color:var(--gold); color:var(--gold);}
+.corner{
+  position:absolute; top:14px; right:14px; z-index:4;
+  display:flex; flex-direction:column; align-items:flex-end; gap:6px;
+}
+.tag{
+  font-size:11.5px; color:#f4f1e6; font-family:Menlo,Consolas,monospace;
+  background:rgba(20,22,15,0.55); padding:6px 10px; border-radius:8px; text-align:right;
+}
+.count{
+  font-family:Menlo,Consolas,monospace; font-size:12px;
+  background:rgba(20,22,15,0.55); color:#f4f1e6; padding:6px 10px; border-radius:8px;
+}
+body.is-full main{height:100vh; height:100dvh;}
+.exit-fs{
+  display:none; position:absolute; top:calc(14px + env(safe-area-inset-top,0px)); left:14px; z-index:5;
+  background:rgba(20,22,15,0.55); color:#fff; border:1px solid rgba(255,255,255,0.3);
+  border-radius:8px; padding:7px 12px; font-size:12px; font-family:Menlo,Consolas,monospace;
+  cursor:pointer;
+}
+body.is-full .exit-fs{display:block;}
+</style>
+</head>
+<body>
+<main>
+  <div id="stage">
+    <video id="video" playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <div class="hint" id="hint">show one hand to the camera</div>
+    <div class="corner">
+      <div class="tag">point to plant · open hand to scatter</div>
+      <div class="count" id="count" style="display:none">0 planted</div>
+      <button class="fs-toggle" id="fsBtn" type="button">⛶ Fullscreen</button>
+    </div>
+    <button class="exit-fs" id="exitFsBtn" type="button">✕ Exit fullscreen</button>
+    <div class="gate" id="gate">
+      <p>This runs entirely in your browser — your hand-tracking model and camera feed never leave the device. Move your index finger to trace a trail of flowers; open your hand wide to scatter it.</p>
+      <button id="start">Turn on camera</button>
+    </div>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const hint = document.getElementById('hint');
+const gate = document.getElementById('gate');
+const countEl = document.getElementById('count');
+const stage = document.getElementById('stage');
+const fsBtn = document.getElementById('fsBtn');
+const exitFsBtn = document.getElementById('exitFsBtn');
+
+// ---- Fullscreen wiring ----
+function requestFs(el){
+  const fn = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+  if(fn) return fn.call(el);
+  return Promise.reject(new Error('Fullscreen API unavailable'));
+}
+function exitFs(){
+  const fn = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+  if(fn) return fn.call(document);
+}
+function isFs(){
+  return !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
+}
+function syncFsClass(){
+  document.body.classList.toggle('is-full', isFs());
+  fsBtn.textContent = isFs() ? '⛶ Exit fullscreen' : '⛶ Fullscreen';
+}
+fsBtn.addEventListener('click', async ()=>{
+  try{
+    if(isFs()) await exitFs();
+    else await requestFs(stage);
+  }catch(err){
+    console.error('Fullscreen error:', err);
+    hint.textContent = 'fullscreen not supported here';
+  }
+});
+exitFsBtn.addEventListener('click', ()=>{ exitFs(); });
+['fullscreenchange','webkitfullscreenchange','msfullscreenchange'].forEach(evt=>{
+  document.addEventListener(evt, syncFsClass);
+});
+
+// palette pulled from the reference floral crown: golden yellow, sky/cobalt blue,
+// violet, hot pink, coral orange, turquoise, cream — plus two leaf greens
+const PETAL_COLORS = ['#f2c53d','#3f7fd6','#8a5cc9','#e8578a','#f2793d','#3fb8ae','#f7f1e0','#c9457a'];
+const LEAF_COLORS = ['#5a9e4a','#7fb35a','#3f7a4a'];
+const CENTER_COLORS = ['#f2c53d','#f7f1e0','#e8578a','#3f7fd6'];
+
+function drawPetalFlower(size, color, centerColor, petalCount){
+  const r = size/2;
+  for(let i=0;i<petalCount;i++){
+    const a = (i/petalCount)*Math.PI*2;
+    ctx.save();
+    ctx.rotate(a);
+    ctx.beginPath();
+    ctx.ellipse(0, -r*0.52, r*0.3, r*0.48, 0, 0, Math.PI*2);
+    ctx.fillStyle = color;
+    ctx.globalAlpha *= 0.96;
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.beginPath();
+  ctx.arc(0, 0, r*0.26, 0, Math.PI*2);
+  ctx.fillStyle = centerColor;
+  ctx.fill();
+}
+
+function drawLeaf(size, color){
+  ctx.beginPath();
+  ctx.ellipse(0, 0, size*0.2, size*0.48, 0, 0, Math.PI*2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0,-size*0.46); ctx.lineTo(0,size*0.46);
+  ctx.stroke();
+}
+
+let flowers = [];      // planted flowers: {x,y,size,rot,type,color,centerColor,petals,vx,vy,life,scattered}
+const MIN_GAP = 16; // px between planted flowers along a trail — lower = denser line
+
+function resize(){
+  canvas.width = canvas.clientWidth * devicePixelRatio;
+  canvas.height = canvas.clientHeight * devicePixelRatio;
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+}
+new ResizeObserver(resize).observe(canvas);
+resize();
+
+function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+// The <video> is displayed with object-fit:cover, so unless the camera's native
+// aspect ratio happens to match the screen's, the visible frame is a cropped,
+// scaled window into the raw feed. MediaPipe's landmark x/y are normalized (0-1)
+// against the *raw, uncropped* frame — mapping them straight onto canvas
+// clientWidth/Height (as before) ignores that crop and drifts off the real hand.
+// This computes the actual displayed rect and maps into it correctly.
+function videoDisplayRect(){
+  const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+  const cw = canvas.clientWidth, ch = canvas.clientHeight;
+  const scale = Math.max(cw/vw, ch/vh);
+  const dw = vw*scale, dh = vh*scale;
+  return { ox:(cw-dw)/2, oy:(ch-dh)/2, dw, dh };
+}
+// raw (unmirrored) normalized landmark -> real canvas pixel position, mirrored
+// to match the flipped video display
+function mapLandmark(x, y){
+  const r = videoDisplayRect();
+  return { x: r.ox + (1-x)*r.dw, y: r.oy + y*r.dh };
+}
+
+function plant(px, py){
+  const isLeaf = Math.random() < 0.18;
+  flowers.push({
+    x: px, y: py,
+    size: 24 + Math.random()*16,
+    rot: Math.random()*Math.PI*2,
+    type: isLeaf ? 'leaf' : 'flower',
+    color: isLeaf ? LEAF_COLORS[Math.floor(Math.random()*LEAF_COLORS.length)]
+                  : PETAL_COLORS[Math.floor(Math.random()*PETAL_COLORS.length)],
+    centerColor: CENTER_COLORS[Math.floor(Math.random()*CENTER_COLORS.length)],
+    petals: 5 + Math.floor(Math.random()*3),
+    vx:0, vy:0, life:1, scattered:false
+  });
+  if(flowers.length > 260) flowers.shift(); // continuous trail — cap length for perf
+  countEl.textContent = flowers.length + ' planted';
+}
+
+function scatterAll(){
+  flowers.forEach(f=>{
+    if(f.scattered) return;
+    f.scattered = true;
+    const a = Math.random()*Math.PI*2;
+    const speed = 3 + Math.random()*5;
+    f.vx = Math.cos(a)*speed;
+    f.vy = Math.sin(a)*speed - 2;
+  });
+}
+
+function drawFlowers(){
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  ctx.clearRect(0,0,w,h);
+  flowers.forEach(f=>{
+    if(f.scattered){
+      f.x += f.vx; f.y += f.vy; f.vy += 0.18; f.life -= 0.012;
+    }
+    if(f.life <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = Math.max(f.life,0);
+    ctx.translate(f.x, f.y);
+    ctx.rotate(f.rot);
+    if(f.type === 'leaf') drawLeaf(f.size, f.color);
+    else drawPetalFlower(f.size, f.color, f.centerColor, f.petals);
+    ctx.restore();
+  });
+  flowers = flowers.filter(f => f.life > 0);
+}
+
+// standard 21-point hand connection map, used to draw the white tracking skeleton
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],
+  [5,9],[9,13],[13,17]
+];
+
+function drawSkeleton(lm){
+  // lm here is raw (unmirrored) MediaPipe output; mapLandmark does the
+  // mirroring + cover-crop mapping in one place so it matches plant() exactly.
+  const pts = lm.map(p => mapLandmark(p.x, p.y));
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  HAND_CONNECTIONS.forEach(([a,b])=>{
+    ctx.moveTo(pts[a].x, pts[a].y);
+    ctx.lineTo(pts[b].x, pts[b].y);
+  });
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  pts.forEach(p=>{
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
+    ctx.fill();
+  });
+  ctx.restore();
+}
+
+// per-hand state, keyed by MediaPipe's handedness label so two hands don't share one trail
+const handState = {};
+function stateFor(key){
+  if(!handState[key]) handState[key] = {wasOpen:false, lastX:null, lastY:null};
+  return handState[key];
+}
+
+// radial extension check: a finger counts as "extended" when its tip sits meaningfully
+// farther from the wrist than its own PIP joint — this stays roughly orientation-independent
+function isExtended(tip, pip, wrist){
+  return dist(tip,wrist) > dist(pip,wrist) * 1.15;
+}
+
+function handleLandmarks(lm, key){
+  const wrist = lm[0];
+  const idxExt = isExtended(lm[8], lm[6], wrist);
+  const midExt = isExtended(lm[12], lm[10], wrist);
+  const ringExt = isExtended(lm[16], lm[14], wrist);
+  const pinkyExt = isExtended(lm[20], lm[18], wrist);
+
+  const isPointing = idxExt && !midExt && !ringExt && !pinkyExt;
+  const isOpen = idxExt && midExt && ringExt && pinkyExt;
+  const st = stateFor(key);
+
+  if(isOpen){
+    if(!st.wasOpen && flowers.length) scatterAll();
+    hint.textContent = 'scattered ✨';
+    st.lastX = st.lastY = null;
+  }else if(isPointing){
+    const { x: px, y: py } = mapLandmark(lm[8].x, lm[8].y);
+    if(st.lastX === null || Math.hypot(px-st.lastX, py-st.lastY) > MIN_GAP){
+      plant(px, py);
+      st.lastX = px; st.lastY = py;
+    }
+    hint.textContent = 'point to plant · open hand to scatter';
+  }else{
+    st.lastX = st.lastY = null;
+    hint.textContent = 'point to plant · open hand to scatter';
+  }
+  st.wasOpen = isOpen;
+}
+
+let hands;
+function initHands(){
+  hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+  hands.setOptions({maxNumHands:2, modelComplexity:1, minDetectionConfidence:0.6, minTrackingConfidence:0.5});
+  hands.onResults((res)=>{
+    drawFlowers();
+    const list = res.multiHandLandmarks;
+    if(list && list.length){
+      list.forEach((lm, i)=>{
+        drawSkeleton(lm);
+        const key = (res.multiHandedness && res.multiHandedness[i]) ? res.multiHandedness[i].label : 'hand'+i;
+        handleLandmarks(lm, key);
+      });
+    }else{
+      Object.keys(handState).forEach(k=>{ handState[k].wasOpen=false; handState[k].lastX=handState[k].lastY=null; });
+      hint.textContent = 'show your hand(s) to the camera';
+    }
+  });
+}
+
+async function start(){
+  gate.style.display = 'none';
+  countEl.style.display = 'block';
+  hint.textContent = 'starting camera…';
+  try{
+    initHands();
+    // Camera utils owns getUserMedia + video.play() itself — calling getUserMedia
+    // a second time ourselves is what was triggering the duplicate permission prompt
+    // and leaving the <video> element out of sync with what MediaPipe was reading.
+    const camera = new Camera(video, {
+      onFrame: async ()=>{ await hands.send({image: video}); },
+      width: 640, height: 480,
+      facingMode: 'user'
+    });
+    await camera.start();
+    // Go fullscreen automatically once the camera is live (still inside the
+    // user's click gesture chain from #start, so browsers allow it).
+    try{ await requestFs(stage); }catch(e){ /* fullscreen optional, ignore if blocked */ }
+  }catch(err){
+    console.error(err);
+    hint.textContent = 'camera unavailable — check permissions and reload';
+    gate.style.display = 'flex';
+    countEl.style.display = 'none';
+  }
+}
+
+document.getElementById('start').addEventListener('click', start);
+</script>
+</body>
+</html>
