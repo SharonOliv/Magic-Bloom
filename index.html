@@ -147,7 +147,7 @@ fsBtn.addEventListener('click', async ()=>{
     hint.textContent = 'fullscreen not supported here';
   }
 });
-exitFsBtn.addEventListener('click', ()=>{ exitFs(); });
+exitFsBtn.addEventListener('click', ()=>{ exitFs(); stopCamera(); gate.style.display = 'flex'; countEl.style.display = 'none'; });
 ['fullscreenchange','webkitfullscreenchange','msfullscreenchange'].forEach(evt=>{
   document.addEventListener(evt, syncFsClass);
 });
@@ -388,6 +388,20 @@ async function start(){
     countEl.style.display = 'none';
   }
 }
+
+// The camera's MediaStream was never being stopped, so the browser/OS kept the
+// recording light on for as long as the tab stayed alive — even backgrounded
+// or navigated away from. This stops every track on the stream whenever the
+// page is actually leaving, which releases the camera immediately.
+function stopCamera(){
+  const stream = video.srcObject;
+  if(stream && stream.getTracks){
+    stream.getTracks().forEach(track => track.stop());
+  }
+  video.srcObject = null;
+}
+window.addEventListener('pagehide', stopCamera);
+window.addEventListener('beforeunload', stopCamera);
 
 document.getElementById('start').addEventListener('click', start);
 </script>
