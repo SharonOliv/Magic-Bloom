@@ -1,6 +1,6 @@
 # Magic Bloom
-Draw flowers on the screen with your fingers !
-Checkout the link below:
+Draw flowers on the screen with your fingers !<br>
+Checkout the link below:<br>
 https://magic-bloom.vercel.app/
 
 ## Tech
